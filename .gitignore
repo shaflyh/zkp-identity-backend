@@ -1,0 +1,15 @@
+# Build artifacts
+build/
+artifacts/
+cache/
+ignition/deployments/
+
+# Node dependencies
+node_modules/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
