@@ -8,7 +8,7 @@ const BUILD_DIR = "./proof";
 const WASM_FILE = path.join(BUILD_DIR, `${CIRCUIT_NAME}_js/${CIRCUIT_NAME}.wasm`);
 const ZKEY_FILE = path.join(BUILD_DIR, `${CIRCUIT_NAME}_final.zkey`);
 
-async function generateProofFromInput({ nik, nama, ttl }) {
+async function generateProof({ nik, nama, ttl }) {
   const poseidon = await poseidonFactory();
   const inputArray = [BigInt(nik), BigInt(nama), BigInt(ttl)];
   const hash = poseidon.F.toObject(poseidon(inputArray));
@@ -41,4 +41,4 @@ async function generateProofFromInput({ nik, nama, ttl }) {
   return { a, b, c, input: inputFormatted };
 }
 
-module.exports = { generateProofFromInput };
+module.exports = { generateProof };
