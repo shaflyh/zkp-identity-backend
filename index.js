@@ -8,6 +8,7 @@ app.use(express.json());
 
 console.log("Starting ZKP backend...");
 
+// GET /
 app.get("/", async (req, res) => {
   try {
     const contractAddress = await zkpContract.getAddress();
