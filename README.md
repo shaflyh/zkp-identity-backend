@@ -46,7 +46,7 @@ docker compose up --build
 
 2. Untuk menjalankan di background:
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 3. Untuk menghentikan:
@@ -57,16 +57,6 @@ docker compose down
 4. Untuk melihat logs:
 ```bash
 docker compose logs -f
-```
-
-5. Untuk rebuild image (setelah mengubah dependencies):
-```bash
-docker compose build
-```
-
-6. Untuk restart container (setelah mengubah environment variables):
-```bash
-docker compose restart
 ```
 
 ## 📡 Endpoint API
