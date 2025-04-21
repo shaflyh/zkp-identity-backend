@@ -10,12 +10,15 @@ const ZKEY_FILE = path.join(BUILD_DIR, `${CIRCUIT_NAME}_final.zkey`);
 
 async function generateProof({ nik, nama, ttl }) {
   const poseidon = await poseidonFactory();
-  const inputArray = [BigInt(nik), BigInt(nama), BigInt(ttl)];
+  // Convert string to BigInt by encoding to hexadecimal
+  const namaHex = Buffer.from(nama, "utf8").toString("hex");
+  const namaBigInt = BigInt("0x" + namaHex);
+  const inputArray = [BigInt(nik), namaBigInt, BigInt(ttl)];
   const hash = poseidon.F.toObject(poseidon(inputArray));
 
   const input = {
     nik: nik.toString(),
-    nama: nama.toString(),
+    nama: namaBigInt.toString(),
     ttl: ttl.toString(),
     identityHash: hash.toString(),
   };
