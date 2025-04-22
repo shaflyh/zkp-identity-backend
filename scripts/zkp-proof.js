@@ -8,40 +8,50 @@ const BUILD_DIR = "./proof";
 const WASM_FILE = path.join(BUILD_DIR, `${CIRCUIT_NAME}_js/${CIRCUIT_NAME}.wasm`);
 const ZKEY_FILE = path.join(BUILD_DIR, `${CIRCUIT_NAME}_final.zkey`);
 
-async function generateProof({ nik, nama, ttl }) {
+async function generateProof({ nik, nama, ttl, key }) {
+  console.log("Generating proof for:", { nik, nama, ttl, key });
   const poseidon = await poseidonFactory();
-  // Convert string to BigInt by encoding to hexadecimal
   const namaHex = Buffer.from(nama, "utf8").toString("hex");
   const namaBigInt = BigInt("0x" + namaHex);
-  const inputArray = [BigInt(nik), namaBigInt, BigInt(ttl)];
-  const hash = poseidon.F.toObject(poseidon(inputArray));
+  const keyHex = Buffer.from(key, "utf8").toString("hex");
+  const keyBigInt = BigInt("0x" + keyHex);
+  const inputArray = [BigInt(nik), namaBigInt, BigInt(ttl), keyBigInt];
+  const identityHash = poseidon.F.toObject(poseidon(inputArray));
 
   const input = {
     nik: nik.toString(),
-    nama: namaBigInt.toString(),
+    nama: namaBigInt,
     ttl: ttl.toString(),
-    identityHash: hash.toString(),
+    key: keyBigInt,
+    identityHash: identityHash.toString(),
   };
 
-  // Step 1: generate witness
+  console.log("Input:", input);
+
   const wasmBuffer = fs.readFileSync(WASM_FILE);
   const witnessCalculatorBuilder = require(`../${BUILD_DIR}/${CIRCUIT_NAME}_js/witness_calculator.js`);
   const wc = await witnessCalculatorBuilder(wasmBuffer);
   const witness = await wc.calculateWTNSBin(input, 0);
 
-  // Step 2: generate proof and public signals
-  const { proof, publicSignals } = await snarkjs.groth16.prove(ZKEY_FILE, witness);
+  const { proof } = await snarkjs.groth16.prove(ZKEY_FILE, witness);
 
-  // Step 3: format for Solidity
   const a = [proof.pi_a[0], proof.pi_a[1]];
   const b = [
     [proof.pi_b[0][1], proof.pi_b[0][0]],
     [proof.pi_b[1][1], proof.pi_b[1][0]],
   ];
   const c = [proof.pi_c[0], proof.pi_c[1]];
-  const inputFormatted = publicSignals.map((x) => x.toString());
 
-  return { a, b, c, input: inputFormatted };
+  return { a, b, c };
 }
 
-module.exports = { generateProof };
+async function getPublicSignal({ nik, nama, ttl, key }) {
+  const poseidon = await poseidonFactory();
+  const namaHex = Buffer.from(nama, "utf8").toString("hex");
+  const keyHex = Buffer.from(key, "utf8").toString("hex");
+  const inputArray = [BigInt(nik), BigInt("0x" + namaHex), BigInt(ttl), BigInt("0x" + keyHex)];
+  const hash = poseidon.F.toObject(poseidon(inputArray));
+  return hash.toString(); // public signal
+}
+
+module.exports = { generateProof, getPublicSignal };
