@@ -2,6 +2,17 @@
 
 Backend API yang mengekspos fungsionalitas smart contract ZKP (Zero Knowledge Proof) untuk verifikasi identitas. API ini memungkinkan verifikasi identitas menggunakan ZKP tanpa harus mengungkapkan data asli.
 
+### Setup
+1. Siapkan file-file ZKP yang diperlukan:
+   - Pastikan folder `IdentityPossessionProof_js` tersedia
+   - Pastikan file `IdentityPossessionProof_final.zkey` sudah merupakan hasil generate ZKP terbaru
+2. Konfigurasi environment variables di file `.env`:
+   - Set `IDENTITY_CONTRACT_ADDRESS` dengan alamat smart contract ZKP yang sudah di-deploy
+   - Set `PRIVATE_KEY` yang sama dengan private key wallet dari deployer smart contract
+3. Verifikasi file kontrak:
+   - Pastikan file `IdentityZKP.json` merupakan hasil build terbaru dari smart contract
+   - File ini dapat ditemukan di direktori `artifacts/contract/IdentityZKP.sol/` pada project smart contract
+
 ## 🚀 Cara Menjalankan
 
 ### Menggunakan Node.js
@@ -75,7 +86,7 @@ curl -X POST http://localhost:3002/verify \
 
 ### 2. Cek Status Verifikasi
 ```bash
-curl http://localhost:3002/status/7
+curl http://localhost:3002/is-verify/7
 ```
 
 ## 📦 Dependencies
