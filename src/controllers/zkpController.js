@@ -4,22 +4,20 @@ class ZKPController {
   async getStatus(req, res) {
     try {
       const contractAddress = await zkpService.getContractAddress();
-      console.log("ZKP Contract loaded:", contractAddress);
-      res.send(`ZKP backend is running. ZKP Contract at: ${contractAddress}`);
+      res.send(`ZKP backend is running. Contract at: ${contractAddress}`);
     } catch (e) {
-      console.error("❌ Failed to get contract address:", e);
       res.status(500).send("Contract failed to load.");
     }
   }
 
-  async register(req, res) {
+  async submitHash(req, res) {
     try {
       const { userId, nik, nama, ttl, key } = req.body;
       if (!userId || !nik || !nama || !ttl || !key) {
         return res.status(400).json({ error: "Missing required fields." });
       }
 
-      const { userHash, publicSignals } = await zkpService.registerUser(
+      const { userHash, publicSignal } = await zkpService.submitUserHash(
         userId,
         nik,
         nama,
@@ -29,13 +27,26 @@ class ZKPController {
 
       return res.json({
         success: true,
-        message: "Hash registered.",
+        message: "Hash submitted to smart contract.",
         userHash,
-        publicSignals,
+        publicSignal,
       });
     } catch (err) {
-      console.error("Register error:", err);
-      res.status(500).json({ error: "Registration failed." });
+      console.error("Submit hash error:", err);
+      res.status(500).json({ error: "Failed to submit hash", message: err });
+    }
+  }
+
+  async approveHash(req, res) {
+    try {
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+      const userHash = await zkpService.approveUserHash(userId);
+      return res.json({ success: true, message: "Hash approved.", userHash });
+    } catch (err) {
+      console.error("Approval error:", err);
+      return res.status(500).json({ error: "Failed to approve hash", message: err });
     }
   }
 
@@ -43,19 +54,10 @@ class ZKPController {
     try {
       const { userId, nik, nama, ttl, key } = req.body;
       if (!userId || !nik || !nama || !ttl || !key) {
-        return res.status(400).json({
-          error: "Missing required fields (userId, nik, nama, ttl, key)",
-        });
+        return res.status(400).json({ error: "Missing required fields." });
       }
 
-      try {
-        await zkpService.verifyUser(userId, nik, nama, ttl, key);
-      } catch (err) {
-        console.error("❌ Contract execution failed:", err);
-        return res.status(400).json({
-          error: "Contract rejected the proof. Possibly invalid proof or not registered.",
-        });
-      }
+      await zkpService.verifyUser(userId, nik, nama, ttl, key);
 
       return res.json({
         success: true,
@@ -63,29 +65,37 @@ class ZKPController {
       });
     } catch (err) {
       console.error("Verification error:", err);
-      return res.status(500).json({ success: false, error: err.message });
-    }
-  }
-
-  async checkRegistration(req, res) {
-    const { userId } = req.params;
-    try {
-      const registered = await zkpService.isRegistered(userId);
-      return res.json({ userId, registered });
-    } catch (err) {
-      console.error("Registration check error:", err);
-      return res.status(500).json({ error: "Failed to check registration status." });
+      return res.status(500).json({ error: "Verification failed", message: err });
     }
   }
 
   async checkVerification(req, res) {
-    const { userId } = req.params;
     try {
+      const { userId } = req.params;
       const verified = await zkpService.isVerified(userId);
       return res.json({ userId, verified });
     } catch (err) {
-      console.error("Verification check error:", err);
-      return res.status(500).json({ error: "Failed to check verification status" });
+      return res.status(500).json({ error: "Failed to check verification status", message: err });
+    }
+  }
+
+  async checkApproval(req, res) {
+    try {
+      const { userId } = req.params;
+      const approved = await zkpService.isApproved(userId);
+      return res.json({ userId, approved });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to check approval status", message: err });
+    }
+  }
+
+  async checkSubmission(req, res) {
+    try {
+      const { userId } = req.params;
+      const submitted = await zkpService.hasSubmitted(userId);
+      return res.json({ userId, submitted });
+    } catch (err) {
+      return res.status(500).json({ error: "Failed to check submission status", message: err });
     }
   }
 }
