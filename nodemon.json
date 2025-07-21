@@ -1,0 +1,19 @@
+{
+  "ignore": [
+    "data/*",
+    "*.json",
+    "node_modules/*",
+    "logs/*",
+    ".git",
+    ".nyc_output",
+    ".sass-cache",
+    "bower_components",
+    "coverage",
+    "tmp"
+  ],
+  "watch": ["controllers/", "services/", "routes/", "models/", "utils/", "contracts/", "index.js"],
+  "ext": "js",
+  "env": {
+    "NODE_ENV": "development"
+  }
+}
