@@ -18,36 +18,26 @@ module.exports = {
 
   // Admin functions
   updateMerkleRoot: (newRoot) => merkleZkpContract.updateMerkleRoot(newRoot),
-  batchUpdateRoots: (roots) => merkleZkpContract.batchUpdateRoots(roots),
-  addSubAdmin: (subAdminAddress) => merkleZkpContract.addSubAdmin(subAdminAddress),
-  removeSubAdmin: (subAdminAddress) => merkleZkpContract.removeSubAdmin(subAdminAddress),
+  updateMerkleRootWithIdentities: (newRoot, identityHashes) =>
+    merkleZkpContract.updateMerkleRootWithIdentities(newRoot, identityHashes),
+  approveIdentity: (identityHash) => merkleZkpContract.approveIdentity(identityHash),
+  revokeIdentity: (identityHash) => merkleZkpContract.revokeIdentity(identityHash),
   transferAdmin: (newAdminAddress) => merkleZkpContract.transferAdmin(newAdminAddress),
-  revokeVerification: (userAddress, reason) =>
-    merkleZkpContract.revokeVerification(userAddress, reason),
-  invalidateRoot: (rootHash) => merkleZkpContract.invalidateRoot(rootHash),
-  cleanupExpiredRoots: (roots) => merkleZkpContract.cleanupExpiredRoots(roots),
 
   // User verification
-  verifyIdentity: (a, b, c, merkleRoot) => merkleZkpContract.verifyIdentity(a, b, c, merkleRoot),
+  verifyIdentity: (a, b, c, identityHash) =>
+    merkleZkpContract.verifyIdentity(a, b, c, identityHash),
 
   // View functions
-  isValidRoot: (rootHash) => merkleZkpContract.isValidRoot(rootHash),
-  getUserVerificationInfo: (userAddress) => merkleZkpContract.getUserVerificationInfo(userAddress),
-  getRootInfo: (rootHash) => merkleZkpContract.getRootInfo(rootHash),
-  isSubAdmin: (address) => merkleZkpContract.isSubAdmin(address),
+  isIdentityApproved: (identityHash) => merkleZkpContract.isIdentityApproved(identityHash),
+  getIdentityInfo: (identityHash) => merkleZkpContract.getIdentityInfo(identityHash),
+  computeIdentityHash: (nik, nama, ttl, key) =>
+    merkleZkpContract.computeIdentityHash(nik, nama, ttl, key),
 
   // Public variables
   currentMerkleRoot: () => merkleZkpContract.currentMerkleRoot(),
-  validRoots: (rootHash) => merkleZkpContract.validRoots(rootHash),
-  rootTimestamp: (rootHash) => merkleZkpContract.rootTimestamp(rootHash),
-  rootNonce: () => merkleZkpContract.rootNonce(),
+  totalApprovedIdentities: () => merkleZkpContract.totalApprovedIdentities(),
   admin: () => merkleZkpContract.admin(),
-  subAdmins: (address) => merkleZkpContract.subAdmins(address),
-  isVerified: (userAddress) => merkleZkpContract.isVerified(userAddress),
-  userMerkleRoot: (userAddress) => merkleZkpContract.userMerkleRoot(userAddress),
-  verificationTimestamp: (userAddress) => merkleZkpContract.verificationTimestamp(userAddress),
-
-  // Constants
-  ROOT_EXPIRY_TIME: () => merkleZkpContract.ROOT_EXPIRY_TIME(),
-  MAX_BATCH_SIZE: () => merkleZkpContract.MAX_BATCH_SIZE(),
+  approvedIdentities: (identityHash) => merkleZkpContract.approvedIdentities(identityHash),
+  identityApprovalBlock: (identityHash) => merkleZkpContract.identityApprovalBlock(identityHash),
 };

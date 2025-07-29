@@ -23,7 +23,7 @@ class MerkleZKPService {
   }
 
   async submitUserData(userId, nik, nama, ttl, key) {
-    console.log("submitUserData", userId, nik, nama, ttl, key);
+    console.log("submitUserData", userId);
 
     // Generate user hash for internal tracking
     const userHash = generateUserHash(userId);
@@ -34,24 +34,22 @@ class MerkleZKPService {
     const saltBigInt = BigInt("0x" + salt);
     console.log("saltBigInt", saltBigInt);
 
-    // Store user data for later Merkle tree construction
+    // Calculate identity hash - this is what we'll store
+    const { identityHash } = await this.calculateIdentityHash(nik, nama, ttl, key);
+    console.log("identityHash", identityHash);
+
+    // Store ONLY the hash and metadata - NOT the raw data
     const userData = {
       userId,
       userHash,
-      nik,
-      nama,
-      ttl,
-      key,
+      identityHash: identityHash.toString(), // Only store the hash
       salt: saltBigInt.toString(),
       status: "pending",
       submittedAt: Date.now(),
+      // NOT storing: nik, nama, ttl, key
     };
 
     await userMerkleModel.saveUser(userId, userData);
-
-    // Calculate identity hash for return
-    const { identityHash } = await this.calculateIdentityHash(nik, nama, ttl, key);
-    console.log("identityHash", identityHash);
 
     return {
       userHash,
@@ -67,9 +65,9 @@ class MerkleZKPService {
       throw new Error("User data not found");
     }
 
-    if (userData.status === "approved" || userData.status === "verified") {
-      throw new Error("User already approved");
-    }
+    // if (userData.status === "approved" || userData.status === "verified") {
+    //   throw new Error("User already approved");
+    // }
 
     // Mark as approved first
     userData.status = "approved";
@@ -79,7 +77,7 @@ class MerkleZKPService {
     await userMerkleModel.saveUser(userId, userData);
 
     // Rebuild Merkle tree with all approved users
-    const { merkleTree, newRoot, leafIndex } = await this.rebuildMerkleTree(userId);
+    const { merkleTree, newRoot, leafIndex, identityHashes } = await this.rebuildMerkleTree(userId);
     console.log("newRoot", newRoot);
     console.log("leafIndex", leafIndex);
 
@@ -87,16 +85,25 @@ class MerkleZKPService {
     userData.leafIndex = leafIndex;
     await userMerkleModel.saveUser(userId, userData);
 
-    // Update Merkle root on-chain
-    // Convert the root to bytes32 format
+    // Update Merkle root and identity statuses on-chain
     const rootBytes32 = "0x" + BigInt(newRoot).toString(16).padStart(64, "0");
     console.log("rootBytes32", rootBytes32);
 
-    const tx = await merkleZkpContract.updateMerkleRoot(rootBytes32);
+    // Convert identity hashes to bytes32 format
+    const identityHashesBytes32 = identityHashes.map(
+      (hash) => "0x" + BigInt(hash).toString(16).padStart(64, "0")
+    );
+
+    // Use the new contract function that updates both root and identity statuses
+    const tx = await merkleZkpContract.updateMerkleRootWithIdentities(
+      rootBytes32,
+      identityHashesBytes32
+    );
     await tx.wait();
 
     return {
       userHash: userData.userHash,
+      identityHash: userData.identityHash,
       newMerkleRoot: newRoot,
       leafIndex: leafIndex,
       totalApprovedUsers: Object.keys(await userMerkleModel.getApprovedUsers()).length,
@@ -108,20 +115,21 @@ class MerkleZKPService {
     const approvedUsers = await userMerkleModel.getApprovedUsers();
     const approvedUsersList = Object.values(approvedUsers);
 
-    // Build leaves array with all approved users
+    // Build leaves array using ONLY identity hashes
     const leavesData = [];
+    const identityHashes = [];
     let targetLeafIndex = -1;
 
     for (let i = 0; i < approvedUsersList.length; i++) {
       const user = approvedUsersList[i];
+
+      // Create leaf data from stored hash
       const leafData = {
-        nik: user.nik,
-        nama: user.nama,
-        ttl: user.ttl,
-        key: user.key,
+        identityHash: user.identityHash,
         salt: user.salt,
       };
       leavesData.push(leafData);
+      identityHashes.push(user.identityHash);
 
       // Track the index of the target user
       if (targetUserId && user.userId === targetUserId) {
@@ -129,9 +137,9 @@ class MerkleZKPService {
       }
     }
 
-    // Build new Merkle tree
-    const { tree, root, leaves } = await buildMerkleTree(leavesData);
-    currentMerkleTree = tree; // Store only the tree instance, not the whole object
+    // Build new Merkle tree from identity hashes
+    const { tree, root, leaves } = await buildMerkleTreeFromHashes(leavesData);
+    currentMerkleTree = tree;
 
     // Save tree data
     await userMerkleModel.saveMerkleTree({ root, leaves });
@@ -140,6 +148,7 @@ class MerkleZKPService {
       merkleTree: tree,
       newRoot: root,
       leafIndex: targetLeafIndex >= 0 ? targetLeafIndex : approvedUsersList.length - 1,
+      identityHashes,
     };
   }
 
@@ -153,6 +162,12 @@ class MerkleZKPService {
       throw new Error("User not approved yet");
     }
 
+    // Verify that the provided data matches the stored identity hash
+    const { identityHash } = await this.calculateIdentityHash(nik, nama, ttl, key);
+    if (identityHash.toString() !== userData.identityHash) {
+      throw new Error("Identity data mismatch");
+    }
+
     // If tree not in memory, rebuild it
     if (!currentMerkleTree || !currentMerkleTree.leaves || currentMerkleTree.leaves.length === 0) {
       console.log("Rebuilding Merkle tree...");
@@ -164,7 +179,7 @@ class MerkleZKPService {
     const currentRoot = await merkleZkpContract.currentMerkleRoot();
     console.log("Contract current root:", currentRoot);
 
-    // Generate Merkle proof
+    // Generate Merkle proof using the provided raw data
     const { proof, publicSignals } = await generateMerkleProof({
       nik,
       nama,
@@ -190,13 +205,16 @@ class MerkleZKPService {
       throw new Error("Merkle root mismatch - tree may be outdated");
     }
 
-    // Submit proof to contract
-    // Convert the root to bytes32 format if needed
-    const rootBytes32 = currentRoot.startsWith("0x")
-      ? currentRoot
-      : "0x" + BigInt(currentRoot).toString(16).padStart(64, "0");
+    // Convert identity hash to bytes32 for event tracking
+    const identityHashBytes32 = "0x" + BigInt(userData.identityHash).toString(16).padStart(64, "0");
 
-    const tx = await merkleZkpContract.verifyIdentity(proof.a, proof.b, proof.c, rootBytes32);
+    // Submit proof to contract with identity hash for event
+    const tx = await merkleZkpContract.verifyIdentity(
+      proof.a,
+      proof.b,
+      proof.c,
+      identityHashBytes32
+    );
 
     const receipt = await tx.wait();
 
@@ -214,18 +232,24 @@ class MerkleZKPService {
   }
 
   async isVerified(userId) {
-    // Check local status
     const userData = await userMerkleModel.getUser(userId);
     if (!userData) return false;
-
-    // For production, you'd map userId to wallet address and check:
-    // return await merkleZkpContract.isVerified(userWalletAddress);
-
     return userData.status === "verified";
   }
 
   async isApproved(userId) {
-    return await userMerkleModel.isApproved(userId);
+    const userData = await userMerkleModel.getUser(userId);
+    if (!userData) return false;
+
+    // Also check on-chain if identity is approved
+    if (userData.identityHash) {
+      const identityHashBytes32 =
+        "0x" + BigInt(userData.identityHash).toString(16).padStart(64, "0");
+      const onChainApproved = await merkleZkpContract.isIdentityApproved(identityHashBytes32);
+      return onChainApproved || userData.status === "approved" || userData.status === "verified";
+    }
+
+    return userData.status === "approved" || userData.status === "verified";
   }
 
   async hasSubmitted(userId) {
@@ -242,10 +266,11 @@ class MerkleZKPService {
       currentRoot: currentRoot.toString(),
       totalApprovedUsers: Object.keys(approvedUsers).length,
       totalSubmittedUsers: Object.keys(allUsers).length,
+      totalApprovedOnChain: contractInfo.totalIdentities.toString(),
       treeHeight: 16,
       maxUsers: 65536,
       contractInfo: {
-        rootNonce: contractInfo.totalRootUpdates.toString(),
+        merkleRoot: contractInfo.merkleRoot,
         admin: contractInfo.contractAdmin,
       },
     };
@@ -270,8 +295,8 @@ class MerkleZKPService {
   async getContractInfo() {
     const contractInfo = await merkleZkpContract.getContractInfo();
     return {
-      currentRoot: contractInfo.currentRoot,
-      rootNonce: contractInfo.totalRootUpdates.toString(),
+      currentRoot: contractInfo.merkleRoot,
+      totalIdentities: contractInfo.totalIdentities.toString(),
       admin: contractInfo.contractAdmin,
     };
   }
@@ -282,7 +307,13 @@ class MerkleZKPService {
 
     for (const [userId, userData] of Object.entries(allUsers)) {
       if (userData.status === "pending") {
-        pendingUsers.push(userData);
+        // Don't expose raw data that we no longer store
+        pendingUsers.push({
+          userId: userData.userId,
+          identityHash: userData.identityHash,
+          submittedAt: userData.submittedAt,
+          status: userData.status,
+        });
       }
     }
 
@@ -294,17 +325,20 @@ class MerkleZKPService {
     return root.toString();
   }
 
-  async isValidRoot(rootHash) {
-    return await merkleZkpContract.isValidRoot(rootHash);
-  }
-
   async rebuildAndUpdateTree() {
     // Rebuild tree with all approved users and update on-chain
-    const { merkleTree, newRoot } = await this.rebuildMerkleTree();
+    const { merkleTree, newRoot, identityHashes } = await this.rebuildMerkleTree();
 
-    // Convert the root to bytes32 format
+    // Convert to bytes32 format
     const rootBytes32 = "0x" + BigInt(newRoot).toString(16).padStart(64, "0");
-    const tx = await merkleZkpContract.updateMerkleRoot(rootBytes32);
+    const identityHashesBytes32 = identityHashes.map(
+      (hash) => "0x" + BigInt(hash).toString(16).padStart(64, "0")
+    );
+
+    const tx = await merkleZkpContract.updateMerkleRootWithIdentities(
+      rootBytes32,
+      identityHashesBytes32
+    );
     await tx.wait();
 
     const approvedUsers = await userMerkleModel.getApprovedUsers();
@@ -316,18 +350,19 @@ class MerkleZKPService {
     };
   }
 
-  async isUserVerified(address) {
-    return await merkleZkpContract.isVerified(address);
+  // Check identity approval on-chain
+  async checkIdentityApproval(nik, nama, ttl, key) {
+    const { identityHash } = await this.calculateIdentityHash(nik, nama, ttl, key);
+    const identityHashBytes32 = "0x" + BigInt(identityHash).toString(16).padStart(64, "0");
+    return await merkleZkpContract.isIdentityApproved(identityHashBytes32);
   }
+}
 
-  async getUserVerificationInfo(address) {
-    const info = await merkleZkpContract.getUserVerificationInfo(address);
-    return {
-      verified: info.verified,
-      merkleRoot: info.merkleRoot,
-      timestamp: info.timestamp.toString(),
-    };
-  }
+// Helper function to build Merkle tree from identity hashes
+async function buildMerkleTreeFromHashes(leavesData) {
+  // Pass the leavesData directly to buildMerkleTree since it already contains
+  // the correct structure with identityHash and salt properties
+  return await buildMerkleTree(leavesData);
 }
 
 module.exports = new MerkleZKPService();

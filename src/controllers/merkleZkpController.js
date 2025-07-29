@@ -9,6 +9,7 @@ class MerkleZKPController {
         status: "ZKP Merkle backend is running",
         contractAddress,
         currentMerkleRoot: merkleInfo.currentRoot,
+        totalApprovedOnChain: merkleInfo.totalApprovedOnChain,
       });
     } catch (e) {
       res.status(500).json({ error: "Contract failed to load.", message: e.message });
@@ -22,12 +23,12 @@ class MerkleZKPController {
         return res.status(400).json({ error: "Missing required fields." });
       }
 
-      // Store user data for later Merkle tree inclusion
+      // Store only identity hash, not raw data
       const result = await merkleZkpService.submitUserData(userId, nik, nama, ttl, key);
 
       return res.json({
         success: true,
-        message: "User data submitted and pending approval.",
+        message: "Identity hash submitted and pending approval.",
         userId,
         identityHash: result.identityHash,
       });
@@ -42,13 +43,14 @@ class MerkleZKPController {
       const { userId } = req.body;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
-      // This will add user to approved list and update Merkle tree
+      // This will add user to approved list, update Merkle tree, and update on-chain status
       const result = await merkleZkpService.approveUser(userId);
 
       return res.json({
         success: true,
-        message: "User approved and added to Merkle tree.",
+        message: "User approved, added to Merkle tree, and registered on-chain.",
         userId,
+        identityHash: result.identityHash,
         newMerkleRoot: result.newMerkleRoot,
         leafIndex: result.leafIndex,
       });
@@ -124,7 +126,6 @@ class MerkleZKPController {
     }
   }
 
-  // Additional methods from your controller that could be useful later
   async getContractInfo(req, res) {
     try {
       const info = await merkleZkpService.getContractInfo();
@@ -135,42 +136,38 @@ class MerkleZKPController {
     }
   }
 
-  async addUser(req, res) {
+  // Check if an identity (not userId) is approved on-chain
+  async checkIdentityApproval(req, res) {
     try {
-      const { userId, nik, nama, ttl, key, autoBuild = false } = req.body;
-      if (!userId || !nik || !nama || !ttl || !key) {
-        return res
-          .status(400)
-          .json({ error: "Missing required fields: userId, nik, nama, ttl, key" });
+      const { nik, nama, ttl, key } = req.body;
+      if (!nik || !nama || !ttl || !key) {
+        return res.status(400).json({ error: "Missing required identity fields" });
       }
 
-      // This is an alternative to submitHash + approveHash in one step
-      const result = await merkleZkpService.submitUserData(userId, nik, nama, ttl, key);
+      const approved = await merkleZkpService.checkIdentityApproval(nik, nama, ttl, key);
 
-      if (autoBuild) {
-        // Automatically approve and build tree
-        try {
-          const approveResult = await merkleZkpService.approveUser(userId);
-          return res.json({
-            success: true,
-            message: "User added and tree updated - ready for verification",
-            userId,
-            ...approveResult,
-          });
-        } catch (buildError) {
-          console.log("Auto-build failed, user added to pending:", buildError.message);
-        }
-      }
-
-      res.json({
+      return res.json({
         success: true,
-        message: "User added to pending approval",
-        userId,
-        identityHash: result.identityHash,
+        approved,
+        message: approved ? "Identity is approved on-chain" : "Identity not approved",
       });
     } catch (err) {
-      console.error("Add user error:", err);
-      res.status(500).json({ error: "Failed to add user", message: err.message });
+      console.error("Check identity approval error:", err);
+      res.status(500).json({ error: "Failed to check identity approval", message: err.message });
+    }
+  }
+
+  async getPendingUsers(req, res) {
+    try {
+      const pendingUsers = await merkleZkpService.getPendingUsers();
+      res.json({
+        success: true,
+        pendingUsers,
+        count: pendingUsers.length,
+      });
+    } catch (err) {
+      console.error("Get pending users error:", err);
+      res.status(500).json({ error: "Failed to get pending users", message: err.message });
     }
   }
 
@@ -180,32 +177,12 @@ class MerkleZKPController {
       const result = await merkleZkpService.rebuildAndUpdateTree();
       res.json({
         success: true,
-        message: "Merkle tree rebuilt and updated",
+        message: "Merkle tree rebuilt and updated with all identity hashes",
         ...result,
       });
     } catch (err) {
       console.error("Build tree error:", err);
       res.status(500).json({ error: "Failed to build and update tree", message: err.message });
-    }
-  }
-
-  async getPendingUsers(req, res) {
-    try {
-      const pendingUsers = await merkleZkpService.getPendingUsers();
-      res.json({
-        success: true,
-        pendingUsers: pendingUsers.map((user) => ({
-          userId: user.userId,
-          nik: user.nik,
-          nama: user.nama,
-          ttl: user.ttl,
-          addedAt: user.submittedAt,
-        })),
-        count: pendingUsers.length,
-      });
-    } catch (err) {
-      console.error("Get pending users error:", err);
-      res.status(500).json({ error: "Failed to get pending users", message: err.message });
     }
   }
 
@@ -219,21 +196,6 @@ class MerkleZKPController {
     } catch (err) {
       console.error("Get current root error:", err);
       res.status(500).json({ error: "Failed to get current root", message: err.message });
-    }
-  }
-
-  async isValidRoot(req, res) {
-    try {
-      const { rootHash } = req.params;
-      const isValid = await merkleZkpService.isValidRoot(rootHash);
-      res.json({
-        success: true,
-        rootHash,
-        isValid,
-      });
-    } catch (err) {
-      console.error("Check root validity error:", err);
-      res.status(500).json({ error: "Failed to check root validity", message: err.message });
     }
   }
 }

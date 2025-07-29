@@ -90,26 +90,26 @@ class SimpleMerkleTree {
   }
 }
 
+// Build Merkle tree from user data that contains identityHash and salt
 async function buildMerkleTree(usersData) {
   const poseidon = await poseidonFactory();
   const leaves = [];
 
-  // Generate leaves for all users
+  console.log("Building Merkle tree with", usersData.length, "users");
+
+  // Generate leaves from identity hashes
   for (const userData of usersData) {
-    // Convert nama and key to BigInt
-    const namaHex = Buffer.from(userData.nama, "utf8").toString("hex");
-    const namaBigInt = BigInt("0x" + namaHex);
-    const keyHex = Buffer.from(userData.key, "utf8").toString("hex");
-    const keyBigInt = BigInt("0x" + keyHex);
+    if (!userData.identityHash || !userData.salt) {
+      throw new Error(`Missing identityHash or salt for user data: ${JSON.stringify(userData)}`);
+    }
 
-    // Generate identity hash
-    const identityInputs = [BigInt(userData.nik), namaBigInt, BigInt(userData.ttl), keyBigInt];
-    const identityHash = poseidon.F.toObject(poseidon(identityInputs));
-
-    // Generate leaf hash with salt and status
-    const leafInputs = [identityHash, BigInt(userData.salt), 1n]; // status: 1 = active
+    // Create leaf hash: H(identityHash, salt, status)
+    const leafInputs = [
+      BigInt(userData.identityHash),
+      BigInt(userData.salt),
+      1n, // status: 1 = active
+    ];
     const leafHash = poseidon.F.toObject(poseidon(leafInputs));
-
     leaves.push(leafHash.toString());
   }
 
@@ -119,11 +119,16 @@ async function buildMerkleTree(usersData) {
 
   const root = merkleTree.getRoot().toString();
 
+  console.log("Merkle tree built. Root:", root);
+  console.log("Number of leaves:", leaves.length);
+
   return { tree: merkleTree, root, leaves };
 }
 
+// Generate Merkle proof for verification
 async function generateMerkleProof({ nik, nama, ttl, key, salt, leafIndex, merkleTree }) {
   console.log("Generating Merkle proof for user at index:", leafIndex);
+  console.log("Tree has", merkleTree.leaves.length, "leaves");
 
   const poseidon = await poseidonFactory();
 
@@ -132,6 +137,12 @@ async function generateMerkleProof({ nik, nama, ttl, key, salt, leafIndex, merkl
   const namaBigInt = BigInt("0x" + namaHex);
   const keyHex = Buffer.from(key, "utf8").toString("hex");
   const keyBigInt = BigInt("0x" + keyHex);
+
+  // Verify the tree has the getProof method
+  if (typeof merkleTree.getProof !== "function") {
+    console.error("MerkleTree object:", merkleTree);
+    throw new Error("Invalid merkleTree object - missing getProof method");
+  }
 
   // Get Merkle proof
   const merkleProof = merkleTree.getProof(leafIndex);

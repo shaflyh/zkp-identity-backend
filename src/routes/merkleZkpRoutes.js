@@ -9,7 +9,7 @@ router.post("/submit-hash", merkleZkpController.submitHash);
 router.post("/approve", merkleZkpController.approveHash);
 router.post("/verify", merkleZkpController.verify);
 
-// Status check routes
+// Status check routes by userId
 router.get("/is-verified/:userId", merkleZkpController.checkVerification);
 router.get("/is-approved/:userId", merkleZkpController.checkApproval);
 router.get("/has-submitted/:userId", merkleZkpController.checkSubmission);
@@ -19,17 +19,12 @@ router.get("/has-submitted/:userId", merkleZkpController.checkSubmission);
 router.get("/contract-info", merkleZkpController.getContractInfo);
 router.get("/merkle-info", merkleZkpController.getMerkleInfo);
 router.get("/current-root", merkleZkpController.getCurrentRoot);
-router.get("/valid-root/:rootHash", merkleZkpController.isValidRoot);
 
-// Alternative user management (combines submit + approve)
-router.post("/add-user", merkleZkpController.addUser);
+// Check identity approval on-chain (without userId)
+router.post("/check-identity-approval", merkleZkpController.checkIdentityApproval);
 
 // Batch operations
 router.get("/pending-users", merkleZkpController.getPendingUsers);
 router.post("/build-tree", merkleZkpController.buildAndUpdateTree);
-
-// For future: verification by address instead of userId
-// router.get("/verified/:address", merkleZkpController.checkUserVerification);
-// router.get("/user-info/:address", merkleZkpController.getUserVerificationInfo);
 
 module.exports = router;
