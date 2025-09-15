@@ -9,7 +9,8 @@ app.use(express.json());
 console.log("Starting ZKP backend...");
 
 // Routes
-app.use("/api/merkle-zkp", zkpRoutes);
+// app.use("/api/merkle-zkp", zkpRoutes);
+app.use("/", zkpRoutes);
 
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => console.log(`ZKP Backend running at http://localhost:${PORT}`));
