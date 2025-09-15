@@ -1,5 +1,4 @@
-// Simple file-based storage for demo
-// In production, use MongoDB, PostgreSQL, etc.
+// Simple file-based storage
 const fs = require("fs").promises;
 const path = require("path");
 
@@ -52,6 +51,17 @@ class UserMerkleModel {
     return approved;
   }
 
+  // Bulk save users (for IPFS restoration)
+  async bulkSaveUsers(usersData) {
+    try {
+      await fs.writeFile(USERS_FILE, JSON.stringify(usersData, null, 2));
+      console.log(`Bulk saved ${Object.keys(usersData).length} users from IPFS`);
+    } catch (error) {
+      console.error("Error bulk saving users:", error);
+      throw error;
+    }
+  }
+
   // Merkle tree operations
   async saveMerkleTree(treeData) {
     await fs.writeFile(
@@ -91,6 +101,35 @@ class UserMerkleModel {
   async isVerified(userId) {
     const user = await this.getUser(userId);
     return user && user.status === "verified";
+  }
+
+  // Clear all data (for testing/reset purposes)
+  async clearAllData() {
+    try {
+      await fs.unlink(USERS_FILE);
+      await fs.unlink(TREE_FILE);
+      console.log("All local data cleared");
+    } catch (error) {
+      // Files might not exist, which is fine
+      console.log("No local data to clear");
+    }
+  }
+
+  // Get data stats
+  async getDataStats() {
+    const users = await this.getAllUsers();
+    const tree = await this.getMerkleTree();
+
+    const stats = {
+      totalUsers: Object.keys(users).length,
+      pendingUsers: Object.values(users).filter((u) => u.status === "pending").length,
+      approvedUsers: Object.values(users).filter((u) => u.status === "approved").length,
+      verifiedUsers: Object.values(users).filter((u) => u.status === "verified").length,
+      hasTreeData: !!tree,
+      lastTreeUpdate: tree?.timestamp || null,
+    };
+
+    return stats;
   }
 }
 

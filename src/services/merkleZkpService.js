@@ -2,20 +2,105 @@ const { generateMerkleProof, buildMerkleTree } = require("../../scripts/zkp-merk
 const merkleZkpContract = require("../contracts/merkleZkpContract");
 const { generateUserHash } = require("../utils/hash");
 const userMerkleModel = require("../models/userMerkleModel");
+const ipfsService = require("./ipfsService");
 const crypto = require("crypto");
 
 let currentMerkleTree = null;
 
 class MerkleZKPService {
   constructor() {
-    // Initialize with empty Merkle tree
-    this.initializeMerkleTree();
+    // Initialize service
+    this.initializeService();
   }
 
-  async initializeMerkleTree() {
-    // Create an empty tree or load from database
-    const { tree } = await buildMerkleTree([]);
-    currentMerkleTree = tree;
+  async initializeService() {
+    console.log("Initializing MerkleZKP Service...");
+
+    try {
+      // Try to load existing tree from IPFS
+      await this.loadTreeFromIPFS();
+    } catch (error) {
+      console.log("No existing IPFS data found, creating empty tree");
+      // Create an empty tree if no IPFS data exists
+      const { tree } = await buildMerkleTree([]);
+      currentMerkleTree = tree;
+    }
+
+    // Test IPFS connection
+    const ipfsConnected = await ipfsService.testConnection();
+    console.log(`IPFS connection: ${ipfsConnected ? "OK" : "FAILED"}`);
+  }
+
+  async loadTreeFromIPFS() {
+    try {
+      // Get current IPFS hash from smart contract
+      const ipfsHash = await merkleZkpContract.getCurrentTreeDataIPFS();
+
+      if (!ipfsHash || ipfsHash.trim() === "") {
+        console.log("No IPFS hash stored in contract");
+        return null;
+      }
+
+      console.log(`Loading tree data from IPFS: ${ipfsHash}`);
+
+      // Retrieve data from IPFS
+      const treeData = await ipfsService.retrieveTreeData(ipfsHash);
+
+      // Restore tree state - convert strings back to BigInt
+      currentMerkleTree = {
+        root: BigInt(treeData.merkleTree.root),
+        leaves: treeData.merkleTree.leaves.map((leaf) => {
+          // Handle both string and already-BigInt values
+          return typeof leaf === "string" ? BigInt(leaf) : leaf;
+        }),
+      };
+
+      // Restore user data first
+      await userMerkleModel.bulkSaveUsers(treeData.users);
+
+      // Rebuild the tree from the restored user data (this gives us a proper SimpleMerkleTree instance)
+      const approvedUsers = await userMerkleModel.getApprovedUsers();
+      const approvedUsersList = Object.values(approvedUsers);
+
+      if (approvedUsersList.length > 0) {
+        const leavesData = approvedUsersList.map((user) => ({
+          identityHash: user.identityHash,
+          salt: user.salt,
+        }));
+
+        const { tree } = await buildMerkleTreeFromHashes(leavesData);
+        currentMerkleTree = tree;
+      } else {
+        const { tree } = await buildMerkleTree([]);
+        currentMerkleTree = tree;
+      }
+
+      console.log(`Successfully loaded tree from IPFS: ${approvedUsersList.length} users`);
+      return treeData;
+    } catch (error) {
+      console.error("Failed to load tree from IPFS:", error.message);
+      throw error;
+    }
+  }
+
+  async saveTreeToIPFS() {
+    try {
+      // Get current tree and user data
+      const allUsers = await userMerkleModel.getAllUsers();
+
+      if (!currentMerkleTree) {
+        throw new Error("No tree to save");
+      }
+
+      // Upload to IPFS
+      const ipfsHash = await ipfsService.uploadTreeData(currentMerkleTree, allUsers);
+
+      console.log(`Tree data saved to IPFS: ${ipfsHash}`);
+      return ipfsHash;
+    } catch (error) {
+      console.error("Failed to save tree to IPFS:", error.message);
+      throw error;
+    }
   }
 
   async getContractAddress() {
@@ -65,10 +150,6 @@ class MerkleZKPService {
       throw new Error("User data not found");
     }
 
-    // if (userData.status === "approved" || userData.status === "verified") {
-    //   throw new Error("User already approved");
-    // }
-
     // Mark as approved first
     userData.status = "approved";
     userData.approvedAt = Date.now();
@@ -85,7 +166,11 @@ class MerkleZKPService {
     userData.leafIndex = leafIndex;
     await userMerkleModel.saveUser(userId, userData);
 
-    // Update Merkle root and identity statuses on-chain
+    // Save tree data to IPFS
+    const ipfsHash = await this.saveTreeToIPFS();
+    console.log("IPFS hash:", ipfsHash);
+
+    // Update Merkle root and identity statuses on-chain WITH IPFS hash
     const rootBytes32 = "0x" + BigInt(newRoot).toString(16).padStart(64, "0");
     console.log("rootBytes32", rootBytes32);
 
@@ -94,10 +179,11 @@ class MerkleZKPService {
       (hash) => "0x" + BigInt(hash).toString(16).padStart(64, "0")
     );
 
-    // Use the new contract function that updates both root and identity statuses
+    // UPDATED: Use the new contract function that includes IPFS hash
     const tx = await merkleZkpContract.updateMerkleRootWithIdentities(
       rootBytes32,
-      identityHashesBytes32
+      identityHashesBytes32,
+      ipfsHash // NEW: Include IPFS hash
     );
     await tx.wait();
 
@@ -106,6 +192,7 @@ class MerkleZKPService {
       identityHash: userData.identityHash,
       newMerkleRoot: newRoot,
       leafIndex: leafIndex,
+      ipfsHash: ipfsHash,
       totalApprovedUsers: Object.keys(await userMerkleModel.getApprovedUsers()).length,
     };
   }
@@ -139,13 +226,24 @@ class MerkleZKPService {
 
     // Build new Merkle tree from identity hashes
     const { tree, root, leaves } = await buildMerkleTreeFromHashes(leavesData);
-    currentMerkleTree = tree;
 
-    // Save tree data
+    // FIXED: Don't destroy the tree instance, just assign it directly
+    currentMerkleTree = tree; // Keep the SimpleMerkleTree instance with all its methods
+
+    // Debug: Verify the tree has both root and getProof method
+    console.log("DEBUG - After rebuild:");
+    console.log("currentMerkleTree.root:", currentMerkleTree.getRoot());
+    console.log(
+      "currentMerkleTree has getProof:",
+      typeof currentMerkleTree.getProof === "function"
+    );
+    console.log("currentMerkleTree.leaves:", currentMerkleTree.leaves);
+
+    // Save tree data locally (backup)
     await userMerkleModel.saveMerkleTree({ root, leaves });
 
     return {
-      merkleTree: tree,
+      merkleTree: currentMerkleTree, // Return the SimpleMerkleTree instance
       newRoot: root,
       leafIndex: targetLeafIndex >= 0 ? targetLeafIndex : approvedUsersList.length - 1,
       identityHashes,
@@ -168,12 +266,8 @@ class MerkleZKPService {
       throw new Error("Identity data mismatch");
     }
 
-    // If tree not in memory, rebuild it
-    if (!currentMerkleTree || !currentMerkleTree.leaves || currentMerkleTree.leaves.length === 0) {
-      console.log("Rebuilding Merkle tree...");
-      const rebuilt = await this.rebuildMerkleTree();
-      currentMerkleTree = rebuilt.merkleTree;
-    }
+    // Ensure tree is current - reload from IPFS if needed
+    await this.ensureTreeIsCurrent();
 
     // Get current merkle root from contract
     const currentRoot = await merkleZkpContract.currentMerkleRoot();
@@ -198,11 +292,28 @@ class MerkleZKPService {
 
     // Verify the root matches
     if (contractRootBigInt !== proofRootBigInt) {
-      console.error("Root mismatch:");
-      console.error("Contract root (hex):", currentRoot);
-      console.error("Contract root (dec):", contractRootBigInt.toString());
-      console.error("Proof root (dec):", proofRootBigInt.toString());
-      throw new Error("Merkle root mismatch - tree may be outdated");
+      console.error("Root mismatch - attempting to reload from IPFS...");
+
+      // Try to reload tree from IPFS
+      await this.loadTreeFromIPFS();
+
+      // Retry proof generation
+      const { proof: newProof, publicSignals: newPublicSignals } = await generateMerkleProof({
+        nik,
+        nama,
+        ttl,
+        key,
+        salt: userData.salt,
+        leafIndex: userData.leafIndex,
+        merkleTree: currentMerkleTree,
+      });
+
+      if (BigInt(currentRoot) !== BigInt(newPublicSignals[0])) {
+        throw new Error("Merkle root mismatch - tree may be outdated even after IPFS reload");
+      }
+
+      // Use the new proof
+      proof = newProof;
     }
 
     // Convert identity hash to bytes32 for event tracking
@@ -229,6 +340,40 @@ class MerkleZKPService {
       transactionHash: receipt.hash,
       merkleRoot: currentRoot.toString(),
     };
+  }
+
+  async ensureTreeIsCurrent() {
+    try {
+      // Check if we have a current tree
+      if (
+        !currentMerkleTree ||
+        !currentMerkleTree.leaves ||
+        currentMerkleTree.leaves.length === 0
+      ) {
+        console.log("No tree in memory, loading from IPFS...");
+        await this.loadTreeFromIPFS();
+        return;
+      }
+
+      // Get on-chain root and IPFS hash
+      const [contractRoot, contractIPFSHash] = await Promise.all([
+        merkleZkpContract.currentMerkleRoot(),
+        merkleZkpContract.getCurrentTreeDataIPFS(),
+      ]);
+
+      // Compare our tree root with contract root
+      const ourRoot = BigInt(currentMerkleTree.root);
+      const theirRoot = BigInt(contractRoot);
+
+      if (ourRoot !== theirRoot) {
+        console.log("Tree root mismatch, reloading from IPFS...");
+        await this.loadTreeFromIPFS();
+      }
+    } catch (error) {
+      console.error("Error ensuring tree is current:", error.message);
+      // Try to reload anyway
+      await this.loadTreeFromIPFS();
+    }
   }
 
   async isVerified(userId) {
@@ -259,11 +404,13 @@ class MerkleZKPService {
   async getMerkleTreeInfo() {
     const currentRoot = await merkleZkpContract.currentMerkleRoot();
     const contractInfo = await merkleZkpContract.getContractInfo();
+    const currentIPFSHash = await merkleZkpContract.getCurrentTreeDataIPFS();
     const allUsers = await userMerkleModel.getAllUsers();
     const approvedUsers = await userMerkleModel.getApprovedUsers();
 
     return {
       currentRoot: currentRoot.toString(),
+      currentIPFSHash: currentIPFSHash,
       totalApprovedUsers: Object.keys(approvedUsers).length,
       totalSubmittedUsers: Object.keys(allUsers).length,
       totalApprovedOnChain: contractInfo.totalIdentities.toString(),
@@ -294,10 +441,13 @@ class MerkleZKPService {
   // Additional helper methods
   async getContractInfo() {
     const contractInfo = await merkleZkpContract.getContractInfo();
+    const currentIPFSHash = await merkleZkpContract.getCurrentTreeDataIPFS();
+
     return {
       currentRoot: contractInfo.merkleRoot,
       totalIdentities: contractInfo.totalIdentities.toString(),
       admin: contractInfo.contractAdmin,
+      currentIPFSHash: currentIPFSHash,
     };
   }
 
@@ -329,15 +479,20 @@ class MerkleZKPService {
     // Rebuild tree with all approved users and update on-chain
     const { merkleTree, newRoot, identityHashes } = await this.rebuildMerkleTree();
 
+    // Save to IPFS
+    const ipfsHash = await this.saveTreeToIPFS();
+
     // Convert to bytes32 format
     const rootBytes32 = "0x" + BigInt(newRoot).toString(16).padStart(64, "0");
     const identityHashesBytes32 = identityHashes.map(
       (hash) => "0x" + BigInt(hash).toString(16).padStart(64, "0")
     );
 
+    // UPDATED: Include IPFS hash in contract call
     const tx = await merkleZkpContract.updateMerkleRootWithIdentities(
       rootBytes32,
-      identityHashesBytes32
+      identityHashesBytes32,
+      ipfsHash // NEW: Include IPFS hash
     );
     await tx.wait();
 
@@ -347,6 +502,7 @@ class MerkleZKPService {
       newRoot,
       totalUsers: Object.keys(approvedUsers).length,
       transactionHash: tx.hash,
+      ipfsHash: ipfsHash,
     };
   }
 
@@ -355,6 +511,45 @@ class MerkleZKPService {
     const { identityHash } = await this.calculateIdentityHash(nik, nama, ttl, key);
     const identityHashBytes32 = "0x" + BigInt(identityHash).toString(16).padStart(64, "0");
     return await merkleZkpContract.isIdentityApproved(identityHashBytes32);
+  }
+
+  // NEW: Manual IPFS operations
+  async forceLoadFromIPFS() {
+    return await this.loadTreeFromIPFS();
+  }
+
+  async forceSaveToIPFS() {
+    return await this.saveTreeToIPFS();
+  }
+
+  // NEW: Get IPFS status
+  async getIPFSStatus() {
+    try {
+      const currentIPFSHash = await merkleZkpContract.getCurrentTreeDataIPFS();
+      const isConnected = await ipfsService.testConnection();
+
+      let ipfsData = null;
+      if (currentIPFSHash && currentIPFSHash.trim() !== "") {
+        try {
+          ipfsData = await ipfsService.retrieveTreeData(currentIPFSHash);
+        } catch (error) {
+          console.warn("Failed to retrieve current IPFS data:", error.message);
+        }
+      }
+
+      return {
+        connected: isConnected,
+        currentHash: currentIPFSHash || null,
+        dataAvailable: !!ipfsData,
+        lastUpdate: ipfsData?.timestamp || null,
+        totalUsers: ipfsData?.metadata?.totalUsers || 0,
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        error: error.message,
+      };
+    }
   }
 }
 

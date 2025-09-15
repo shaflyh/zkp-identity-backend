@@ -140,7 +140,7 @@ async function generateMerkleProof({ nik, nama, ttl, key, salt, leafIndex, merkl
 
   // Verify the tree has the getProof method
   if (typeof merkleTree.getProof !== "function") {
-    console.error("MerkleTree object:", merkleTree);
+    // console.error("MerkleTree object:", merkleTree);
     throw new Error("Invalid merkleTree object - missing getProof method");
   }
 

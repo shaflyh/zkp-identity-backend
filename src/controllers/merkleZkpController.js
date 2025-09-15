@@ -5,11 +5,14 @@ class MerkleZKPController {
     try {
       const contractAddress = await merkleZkpService.getContractAddress();
       const merkleInfo = await merkleZkpService.getMerkleTreeInfo();
+      const ipfsStatus = await merkleZkpService.getIPFSStatus();
+
       res.json({
         status: "ZKP Merkle backend is running",
         contractAddress,
         currentMerkleRoot: merkleInfo.currentRoot,
         totalApprovedOnChain: merkleInfo.totalApprovedOnChain,
+        ipfs: ipfsStatus,
       });
     } catch (e) {
       res.status(500).json({ error: "Contract failed to load.", message: e.message });
@@ -43,16 +46,17 @@ class MerkleZKPController {
       const { userId } = req.body;
       if (!userId) return res.status(400).json({ error: "Missing userId" });
 
-      // This will add user to approved list, update Merkle tree, and update on-chain status
+      // This will add user to approved list, update Merkle tree, save to IPFS, and update on-chain status
       const result = await merkleZkpService.approveUser(userId);
 
       return res.json({
         success: true,
-        message: "User approved, added to Merkle tree, and registered on-chain.",
+        message: "User approved, added to Merkle tree, saved to IPFS, and registered on-chain.",
         userId,
         identityHash: result.identityHash,
         newMerkleRoot: result.newMerkleRoot,
         leafIndex: result.leafIndex,
+        ipfsHash: result.ipfsHash, // NEW: Return IPFS hash
       });
     } catch (err) {
       console.error("Approval error:", err);
@@ -177,7 +181,8 @@ class MerkleZKPController {
       const result = await merkleZkpService.rebuildAndUpdateTree();
       res.json({
         success: true,
-        message: "Merkle tree rebuilt and updated with all identity hashes",
+        message:
+          "Merkle tree rebuilt, saved to IPFS, and updated on-chain with all identity hashes",
         ...result,
       });
     } catch (err) {
@@ -196,6 +201,51 @@ class MerkleZKPController {
     } catch (err) {
       console.error("Get current root error:", err);
       res.status(500).json({ error: "Failed to get current root", message: err.message });
+    }
+  }
+
+  // IPFS-specific endpoints
+  async getIPFSStatus(req, res) {
+    try {
+      const status = await merkleZkpService.getIPFSStatus();
+      res.json({
+        success: true,
+        ipfs: status,
+      });
+    } catch (err) {
+      console.error("Get IPFS status error:", err);
+      res.status(500).json({ error: "Failed to get IPFS status", message: err.message });
+    }
+  }
+
+  async forceLoadFromIPFS(req, res) {
+    try {
+      const result = await merkleZkpService.forceLoadFromIPFS();
+      res.json({
+        success: true,
+        message: "Successfully loaded tree data from IPFS",
+        data: {
+          totalUsers: result ? Object.keys(result.users || {}).length : 0,
+          timestamp: result ? result.timestamp : null,
+        },
+      });
+    } catch (err) {
+      console.error("Force load from IPFS error:", err);
+      res.status(500).json({ error: "Failed to load from IPFS", message: err.message });
+    }
+  }
+
+  async forceSaveToIPFS(req, res) {
+    try {
+      const ipfsHash = await merkleZkpService.forceSaveToIPFS();
+      res.json({
+        success: true,
+        message: "Successfully saved tree data to IPFS",
+        ipfsHash: ipfsHash,
+      });
+    } catch (err) {
+      console.error("Force save to IPFS error:", err);
+      res.status(500).json({ error: "Failed to save to IPFS", message: err.message });
     }
   }
 }

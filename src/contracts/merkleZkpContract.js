@@ -17,9 +17,9 @@ module.exports = {
   getContractInfo: () => merkleZkpContract.getContractInfo(),
 
   // Admin functions
-  updateMerkleRoot: (newRoot) => merkleZkpContract.updateMerkleRoot(newRoot),
-  updateMerkleRootWithIdentities: (newRoot, identityHashes) =>
-    merkleZkpContract.updateMerkleRootWithIdentities(newRoot, identityHashes),
+  updateMerkleRoot: (newRoot, ipfsHash) => merkleZkpContract.updateMerkleRoot(newRoot, ipfsHash),
+  updateMerkleRootWithIdentities: (newRoot, identityHashes, ipfsHash) =>
+    merkleZkpContract.updateMerkleRootWithIdentities(newRoot, identityHashes, ipfsHash),
   approveIdentity: (identityHash) => merkleZkpContract.approveIdentity(identityHash),
   revokeIdentity: (identityHash) => merkleZkpContract.revokeIdentity(identityHash),
   transferAdmin: (newAdminAddress) => merkleZkpContract.transferAdmin(newAdminAddress),
@@ -33,9 +33,11 @@ module.exports = {
   getIdentityInfo: (identityHash) => merkleZkpContract.getIdentityInfo(identityHash),
   computeIdentityHash: (nik, nama, ttl, key) =>
     merkleZkpContract.computeIdentityHash(nik, nama, ttl, key),
+  getCurrentTreeDataIPFS: () => merkleZkpContract.getCurrentTreeDataIPFS(),
 
   // Public variables
   currentMerkleRoot: () => merkleZkpContract.currentMerkleRoot(),
+  currentTreeDataIPFS: () => merkleZkpContract.currentTreeDataIPFS(),
   totalApprovedIdentities: () => merkleZkpContract.totalApprovedIdentities(),
   admin: () => merkleZkpContract.admin(),
   approvedIdentities: (identityHash) => merkleZkpContract.approvedIdentities(identityHash),
